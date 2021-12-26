@@ -1,0 +1,78 @@
+---
+- hosts: all
+  become: yes
+  vars: 
+    - host_username: -u
+    - cifs_username: -u
+    - cifs_password: -p
+    - tv_shows_folder_path: "//192.168.86.222/video/TV Shows"
+    - movies_folder_path: //192.168.86.222/video/Movies
+    - config_downloads_path: //192.168.86.222/Proxmox/htpc_downloads
+  tasks:
+    - name: Create config folder
+      file:
+        path: /home/{{ host_username }}/config/app_config
+        state: directory
+
+    - name: Pull Terraform from github
+      git:
+        repo: 'https://github.com/tehgod/docker_setup.git'
+        dest: /home/{{ host_username }}/github
+      become: yes
+      become_user: "{{ host_username }}"
+    
+    - name: Verify fstab exists before proceeding
+      file:
+        path: /etc/fstab
+        state: file
+
+    - name: Add Movies CIFS share 
+      mount:
+        path: /home/{{ host_username }}/config/complete/movies
+        src: "{{ movies_folder_path }}"
+        fstype: cifs
+        opts: username={{ cifs_username }},password={{ cifs_password }},uid=1000,gid=1000
+        state: mounted
+    
+    - name: Add TV Shows CIFS share 
+      mount:
+        path: /home/{{ host_username }}/config/complete/tv_shows
+        src: "{{ tv_shows_folder_path }}"
+        fstype: cifs
+        opts: username={{ cifs_username }},password={{ cifs_password }},uid=1000,gid=1000
+        state: mounted
+
+    - name: Add current downloads CIFS share
+      mount:
+        path: /home/{{ host_username }}/config/downloads
+        src: "{{ config_downloads_path }}"
+        fstype: cifs
+        opts: username={{ cifs_username }},password={{ cifs_password }},uid=1000,gid=1000
+        state: mounted
+
+    - name: Install required packages
+      apt: name={{ item }} state=latest update_cache=yes force_apt_get=yes
+      loop: ['ca-certificates', 'curl', 'gnupg', 'lsb-release', 'software-properties-common']
+
+    - name: Add Docker and Terraform GPG apt keys
+      apt_key:
+        url: "{{ item }}"
+        state: present
+      loop: ['https://download.docker.com/linux/ubuntu/gpg', 'https://apt.releases.hashicorp.com/gpg']
+
+    - name: Add Docker and Terraform Repos
+      apt_repository:
+        repo: deb {{ item }} focal main
+        state: present
+      loop: ['https://download.docker.com/linux/ubuntu', 'https://apt.releases.hashicorp.com']
+
+    - name: Install Docker-ce and Terraform
+      apt: update_cache=yes name={{ item }} state=latest
+      loop: ['docker-ce', 'terraform']
+
+    - name: Add user to docker group
+      become: yes
+      user: name={{ host_username }} group=docker shell=/bin/bash append=yes
+
+    - name: Reboot to apply group update
+      reboot:
